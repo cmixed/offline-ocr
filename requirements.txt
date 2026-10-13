@@ -1,0 +1,26 @@
+# OCR 小软件依赖清单
+# 安装方式见 README 或 setup.bat
+
+# ===== 核心 OCR 引擎 =====
+# 注意：PaddlePaddle 需用官方镜像安装（PyPI 无最新 CPU 版）：
+#   .venv/Scripts/python.exe -m pip install paddlepaddle==3.2.1 -i https://www.paddlepaddle.org.cn/packages/stable/cpu/
+paddlepaddle==3.2.1
+paddleocr==3.2.0
+
+# ===== 依赖修复（PaddlePaddle 3.2.1 的遗漏依赖，需手动补装）=====
+# setuptools：import paddle 报 ModuleNotFoundError，需补装
+# chardet：paddlex 依赖，官方镜像无此包，需先装
+setuptools>=84.0.0
+chardet>=7.6.0
+
+# ===== 界面框架 =====
+# 选用 PySide6 而非 PyQt6：PyQt6 为 GPL-3.0-only（强传染性），
+# PySide6 为 LGPLv3，允许本项目以 MIT 许可证发布。
+PySide6>=6.6
+
+# ===== 图像处理（预处理用）=====
+opencv-python>=4.8
+Pillow>=10.0
+
+# ===== 打包工具（阶段四使用）=====
+pyinstaller>=6.0
