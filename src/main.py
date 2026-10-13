@@ -16,6 +16,7 @@ OCR 小软件 —— GUI 主程序
     .venv/Scripts/python.exe src/main.py
 """
 import os
+import shutil
 import sys
 
 # 保证能 import 同目录的 ocr_engine
@@ -52,6 +53,38 @@ def _asset_path(name: str) -> str:
     else:
         base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     return os.path.join(base, "assets", name)
+
+
+def _ensure_bundled_models() -> None:
+    """把打包内置的 OCR 模型复制到用户缓存目录（仅打包运行时生效）。
+
+    模型随包分发是为了「开箱即用、完全离线」；但仍复制到 paddlex 惯用的
+    ~/.paddlex/official_models/ 路径，因为该目录可写 —— paddlex 需要在其下
+    创建 locks / temp / func_ret 等子目录，而打包解包目录未必可写。
+
+    已存在同名模型则跳过，不覆盖用户可能自行更新的版本。
+    """
+    if not getattr(sys, "frozen", False):
+        return
+    src_root = os.path.join(
+        getattr(sys, "_MEIPASS", ""), "paddlex_models", "official_models")
+    if not os.path.isdir(src_root):
+        return
+    # 与 paddlex 的缓存定位保持一致：优先读环境变量，否则用 ~/.paddlex
+    cache_home = os.environ.get("PADDLE_PDX_CACHE_HOME") or os.path.join(
+        os.path.expanduser("~"), ".paddlex")
+    dst_root = os.path.join(cache_home, "official_models")
+    for name in os.listdir(src_root):
+        src = os.path.join(src_root, name)
+        dst = os.path.join(dst_root, name)
+        if not os.path.isdir(src) or os.path.isdir(dst):
+            continue
+        try:
+            os.makedirs(dst_root, exist_ok=True)
+            shutil.copytree(src, dst)
+        except OSError:
+            # 复制失败不阻断启动：首次识别时会自行联网下载模型
+            pass
 
 
 def pil_to_qpixmap(pil_img) -> QPixmap:
@@ -559,6 +592,59 @@ class MainWindow(QMainWindow):
                 f"｜本次拖入 {len(paths)} 个文件，暂不支持批量")
 
 
+def _selftest() -> int:
+    """无界面自检：程序生成一张文字图，跑一次完整识别流程。
+
+    用于验证「打包后的 exe」能否真正加载模型并识别（GUI 程序无控制台，
+    故把结果写入 %TEMP%/ocr_selftest.txt，并用退出码表示成败）。
+
+    退出码：0 = 成功；1 = 未识别到文字；2 = 抛出异常。
+    """
+    import tempfile
+
+    from ocr_engine import OCREngine
+
+    out_path = os.path.join(tempfile.gettempdir(), "ocr_selftest.txt")
+    try:
+        from PIL import Image, ImageDraw
+
+        img = Image.new("RGB", (640, 150), "white")
+        draw = ImageDraw.Draw(img)
+        draw.text((24, 24), "OCR 自检 2026", fill="black",
+                  font=OCREngine.load_font(48))
+        draw.text((24, 92), "Hello 12345", fill="black",
+                  font=OCREngine.load_font(38))
+        img_path = os.path.join(tempfile.gettempdir(), "ocr_selftest_input.png")
+        img.save(img_path)
+
+        lines = OCREngine().recognize(img_path)
+        text = " | ".join(line.text for line in lines)
+        with open(out_path, "w", encoding="utf-8") as f:
+            f.write(f"OK lines={len(lines)}\n{text}\n")
+        return 0 if lines else 1
+    except Exception as exc:  # noqa: BLE001 - 自检需兜住一切异常并回报
+        import traceback
+
+        lines = [f"FAIL {type(exc).__name__}: {exc}", "", "--- traceback ---",
+                 traceback.format_exc()]
+        # 附带 paddlex 的依赖判定结果，便于定位打包后「依赖缺失」的真实原因
+        try:
+            from paddlex.utils import deps as _deps
+
+            lines.append("--- paddlex 依赖可用性 ---")
+            for _name in sorted(_deps.DEP_SPECS):
+                try:
+                    lines.append(f"{_name}: {_deps.is_dep_available(_name)}"
+                                 f" (ver={_deps.get_dep_version(_name)})")
+                except Exception as _e2:  # noqa: BLE001
+                    lines.append(f"{_name}: ERR {type(_e2).__name__}: {_e2}")
+        except Exception as _e2:  # noqa: BLE001
+            lines.append(f"依赖诊断本身失败: {type(_e2).__name__}: {_e2}")
+        with open(out_path, "w", encoding="utf-8") as f:
+            f.write("\n".join(lines))
+        return 2
+
+
 def main():
     app = QApplication(sys.argv)
     # 显式指定中文字体，保证跨环境中文显示正常
@@ -575,4 +661,11 @@ def main():
 
 
 if __name__ == "__main__":
+    # 打包运行时：把内置模型释放到用户缓存（首次启动一次性动作）
+    _ensure_bundled_models()
+
+    # --selftest：无界面自检（不启动 GUI），供打包后验证与自动化测试使用
+    if "--selftest" in sys.argv:
+        sys.exit(_selftest())
+
     main()

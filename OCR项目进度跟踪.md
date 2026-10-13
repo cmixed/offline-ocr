@@ -84,10 +84,11 @@
 - ✅ 大图压缩预处理（已在「打包前准备」中落地，见第 8 节）
 - ⏳ 多语言（中/英/繁体）
 
-### 6. 阶段四：打包与发布
+### 6. 阶段四：打包与发布（🟡 进行中）
 
-- 🔮 PyInstaller 打包单文件 .exe
-- 🔮 README + LICENSE + GitHub Releases
+- ✅ PyInstaller 打包为 Windows 可执行程序（`--onedir` 形态，详见第 12 节）
+- ✅ README + `LICENSE`（MIT）+ `THIRD-PARTY-NOTICES.md`
+- 🔮 GitHub Releases（上传产物压缩包）
 - 🔮 GitHub Actions 自动化构建
 
 ### 7. 工程结构整理（✅ 已完成）
@@ -186,6 +187,32 @@
 > 备注：打包分发（阶段四）需继续遵守 LGPLv3 —— 建议采用 `--onedir` 形态，
 > 并随产物附带本声明与 LGPLv3 全文，便于用户替换 LGPL 库。
 
+### 12. 打包为 Windows 可执行程序（✅ 已完成）
+
+- ✅ 打包配置 `ocrapp.spec`（PyInstaller 6.22.3），采用 **`--onedir`** 目录形态，原因有二：
+  - **启动快**：免去单文件版每次运行都要解包上百 MB 的开销
+  - **合规 LGPLv3**：PySide6 以独立 `.dll/.pyd` 分发，便于用户按许可证替换 Qt 库
+- ✅ **内置模型**：`PP-OCRv5_mobile_det` + `PP-OCRv5_mobile_rec`（约 22MB）随包分发，
+  首次运行由 `main.py` 的 `_ensure_bundled_models()` 释放到 `~/.paddlex/official_models/`
+  （与 paddlex 一致，尊重 `PADDLE_PDX_CACHE_HOME`），实现**开箱即用、完全离线**；目标已存在则跳过、不覆盖
+- ✅ **体积优化**：排除 PySide6 未用模块（WebEngine / Qt3D / QtQuick 等，Qt 部分压到约 92MB）、
+  `modelscope` 的重型子包、`paddle.jit.sot`
+- ✅ **无界面自检开关** `OCR小软件.exe --selftest`：程序化生成文字图并跑通完整识别流程，
+  结果写入 `%TEMP%/ocr_selftest.txt`，以退出码表示成败（便于打包验证与自动化测试）
+
+**实测数据（隔离环境验证）**：清空缓存并把 `PADDLE_PDX_CACHE_HOME` 指向临时目录后运行产物 ——
+模型被正确释放至该目录，识别输出 `OCR 自检 2026 | Hello 12345`，**退出码 0**；
+GUI 进程亦正常启动（约 96MB 常驻内存）。
+产物体积约 **711MB**（PaddlePaddle ≈308MB + Qt ≈92MB + 内置模型 22MB）。
+
+**打包踩坑记录（对可复现很关键）**：
+
+| 现象 | 根因 | 解法 |
+|------|------|------|
+| `A dependency error occurred during pipeline creation` | paddlex 用 `importlib.metadata` 判断依赖是否已安装；PyInstaller 默认不打包 `*.dist-info`，导致 `ocr-core` 依赖集被误判为缺失 | spec 中逐个 `copy_metadata` 收集全部已安装分发的元数据 |
+| 构建在依赖分析阶段崩溃（隔离子进程 died：`paddle.jit.sot`） | `collect_submodules('paddlex')` 牵连 `modelscope` 全量子模块 | excludes 排除 `modelscope.models` / `msdatasets` / `trainers` / `pipelines` 等，及 `paddle.jit.sot` |
+| 清理含上千文件的构建目录时被安全拦截 | 目录文件数超阈值 | 构建前手动清理 `build/`、`dist/` |
+
 ---
 
 ## 三、工程可复现性（开源硬指标）
@@ -256,25 +283,26 @@
 4. ✅ 阶段三体验优化第一批（进度反馈 / 原图切换 / 图片缩放 / 拖动平移）
 5. ✅ 打包前准备：模型预下载脚本 + 中文路径 / 超大图 / 损坏文件边界处理（边界测试 5/5 通过）
 6. ✅ 多格式支持与解码统一：17 种格式可识别，GUI 与引擎共用同一套 PIL 解码（格式测试 36/36 通过）
+7. ✅ 界面框架迁移 PyQt6 → PySide6：规避 GPL-3.0-only 传染，全功能回归通过（见第 11 节）
+8. ✅ 开源合规落地：MIT `LICENSE` + `THIRD-PARTY-NOTICES.md` + 初始化 git 仓库（首次提交 22 个文件）
+9. ✅ 打包为 Windows 可执行程序（PyInstaller `--onedir`，内置模型、完全离线；隔离环境验证通过）
 
 ### 未完成（按优先级排序）
 
 | 优先级 | 事项 | 说明 |
 |--------|------|------|
-| **P0** | 初始化 git 仓库 | 当前 `ocrapp/` 下**没有 `.git`**，开源的第一步，也是 Releases / Actions 的前提 |
-| **P0** | 添加 `LICENSE` | README 中仍写「待定」，需在 Apache 2.0 / MIT 之间定一个 |
-| **P0** | PyInstaller 打包 `.exe` | 阶段四核心交付物；需处理模型打包（打进包 vs 首次下载）与体积控制 |
 | P1 | 快捷键（Ctrl+O 打开 / Ctrl+Enter 识别 / Ctrl+S 导出） | 阶段三第 5 项，纯增量、改动小 |
 | P1 | 记住窗口大小与上次目录（QSettings） | 阶段三第 5 项，同上 |
 | P1 | README 补界面截图 / 动图 | 可行性计划 7.1 节明确「对吸引用户最关键」，目前只有 `test/gui_*.png` 未接入 README |
+| P1 | GitHub Releases 发布 | 上传 `dist/OCR小软件` 压缩包，README 补「下载即用」说明 |
 | P2 | 真实场景测试（截图 / 扫描件 / 照片） | **阶段一遗留**：至今只用程序生成的合成图测过，未验证真实场景 |
 | P2 | 记录识别准确率与速度 | **阶段一遗留**：目前只有置信度，缺乏量化数据 |
 | P2 | 真实场景样例图 + 期望输出落盘 | 可复现性「结果可复现」那一层（有 `test_edge_cases.py` 但无基准输出文件） |
-| P3 | GitHub Releases + GitHub Actions | 发布与 CI |
+| P3 | GitHub Actions 自动化构建 | 发布与 CI |
 | P3 | 多语言（中/英）、批量识别、模糊图预处理、特殊字体适配 | 阶段三第 6~8 项，超出首版核心范围 |
 
 > 说明：各阶段的**验收标准均已达到**（阶段一「稳定输出中文文本」、阶段二「选图→识别→复制/导出闭环」、阶段三「启动快、不卡顿」）。
-> 上表列的是计划中列明但尚未落地的事项，其中 P0 三项是「能对外发布」的硬前提。
+> 对外发布所需的硬前提（`LICENSE`、git 仓库、打包产物）已全部完成，剩余为体验优化与发布/CI 环节。
 
 ---
 

@@ -1,0 +1,15 @@
+# 统一换行符策略，避免 Windows / Linux 协作时出现整文件 diff
+# 默认：文本文件在仓库内统一存 LF，检出时按平台自动转换
+* text=auto eol=lf
+
+# Windows 批处理必须用 CRLF，否则可能无法执行
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# 二进制文件不做换行符转换
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.ico binary
+*.webp binary
+*.bmp binary

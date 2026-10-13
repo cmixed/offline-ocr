@@ -26,6 +26,7 @@
 - [x] 模型预下载脚本（可离线使用，首次无需联网）
 - [x] 边界处理：中文路径 / 超大图自动压缩 / 损坏文件友好报错
 - [x] 应用图标（由脚本生成，可复现）
+- [x] 打包为 Windows 可执行文件（PyInstaller，内置模型、开箱即用、完全离线）
 - [ ] 快捷键、记住窗口与目录设置
 - [ ] 截图即时识别（垂直场景，规划中）
 
@@ -168,6 +169,44 @@ REM 4. 安装其余依赖
 
 逐一验证 `SUPPORTED_EXTS` 里每种格式的「载入 + 识别」都正常，并检查扩展名判定（含大小写不敏感），全部通过会打印 `36/36 项通过`。
 
+## 打包与分发（生成 .exe）
+
+项目已配置好 PyInstaller 打包脚本 `ocrapp.spec`，一条命令即可产出可执行程序：
+
+```bat
+.venv\Scripts\python.exe -m PyInstaller ocrapp.spec --noconfirm
+```
+
+产物位于 `dist\OCR小软件\`，双击其中的 `OCR小软件.exe` 即可运行。
+
+**为什么是「文件夹」而不是单文件 exe？**
+
+本项目采用 PyInstaller 的 `--onedir`（目录）形态，而非 `--onefile`（单文件），原因有二：
+
+1. **启动更快**：单文件 exe 每次运行都要先把上百 MB 内容解包到临时目录，首启明显变慢；目录形态直接加载。
+2. **LGPLv3 合规**：界面框架 PySide6 采用 LGPLv3，以独立 `.dll/.pyd` 文件形式分发，便于用户按许可证要求替换 Qt 库文件。
+
+**内置模型，开箱即用**
+
+`PP-OCRv5_mobile_det` / `PP-OCRv5_mobile_rec`（约 22MB）已随包分发。首次运行时程序会把它们释放到标准缓存目录 `~/.paddlex/official_models/`，因此：
+
+- **无需联网**：解压即用，断网也能识别
+- **不重复占用**：若该目录已有同名模型则跳过，不覆盖用户自行更新的版本
+- 想自定义缓存位置，可设置环境变量 `PADDLE_PDX_CACHE_HOME`
+
+**打包后自检**
+
+打包产物提供无界面自检开关，用于确认「模型能否加载、识别是否正常」：
+
+```bat
+dist\OCR小软件\OCR小软件.exe --selftest
+```
+
+它会程序化生成一张文字图并跑通完整识别流程，结果写入 `%TEMP%\ocr_selftest.txt`，退出码 `0` 表示成功。
+
+> **体积说明**：完整产物约 700MB，主要来自 PaddlePaddle 推理框架（约 300MB）与 Qt 运行库。
+> 这是「本地离线深度学习 OCR」的固有成本 —— 换来的是数据不出本机、无需 API Key、无调用次数限制。
+
 ## 目录结构
 
 ```
@@ -192,11 +231,15 @@ ocrapp/
 │   ├── icon.png           # 256×256 PNG（README / 非 Windows 平台）
 │   └── make_icon.py       # 图标生成脚本（保证图标可复现）
 ├── requirements.txt       # 依赖清单（含版本说明）
-├── requirements.lock      # 全量锁定版本（pip freeze）
+├── requirements.lock      # 全量锁定版本（pip freeze，69 个包）
 ├── setup.bat              # 一键安装脚本
+├── ocrapp.spec            # PyInstaller 打包配置（生成 dist/OCR小软件）
+├── LICENSE                # MIT 许可证
+├── THIRD-PARTY-NOTICES.md # 第三方组件许可证声明
 ├── OCR小软件可行性计划.md   # 技术方案与四阶段路线图
 ├── OCR项目进度跟踪.md       # 进度、待完善项、优化方向
-├── .gitignore
+├── .gitignore             # 忽略虚拟环境 / 运行产物 / 模型缓存
+├── .gitattributes         # 统一换行符策略（bat 用 CRLF，其余 LF）
 └── README.md
 ```
 
@@ -208,6 +251,16 @@ ocrapp/
 - PaddlePaddle 3.2.1 遗漏 `setuptools` 依赖，`import paddle` 会报错，需手动补装
 - `paddlex` 依赖 `chardet`，官方镜像无此包，需先装
 - PaddleOCR 3.x 使用新 API（`text_detection_model_name` + `predict()`），网上旧教程的 `use_angle_cls`/`ocr()` 已废弃
+
+### 打包（PyInstaller）相关踩坑
+
+- **包元数据必须一起打包**：paddlex 在运行时用 `importlib.metadata` 判断依赖是否「已安装」，而 PyInstaller 默认不打包 `*.dist-info`，
+  会让 OCR 管线把依赖误判为缺失，报 `A dependency error occurred during pipeline creation`。
+  解法：在 spec 中收集全部已安装分发的元数据（`copy_metadata`）。
+- **排除 modelscope 的重型子包**：`collect_submodules('paddlex')` 会牵连 `modelscope.models` 等大量 CV/NLP 模型定义；
+  实测 OCR 只用到 `modelscope.hub`/`utils`，故排除其余子包，并排除 `paddle.jit.sot`
+  （后者在打包依赖分析阶段会导致隔离子进程崩溃）。
+- **界面库换用 PySide6**：PyQt6 为 `GPL-3.0-only`（强传染），迁移到 PySide6（`LGPLv3`）后，本项目才能以 MIT 开源。
 
 ### 已主动处理的边界情况
 
