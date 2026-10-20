@@ -45,3 +45,7 @@ test/_fmt_tmp/
 
 # ==== 个人素材（第三方版权，不入开源仓库）====
 Shiina_Mashiro_from_Sakurasou*.png
+
+# ==== Release 打包产物（附件上传，不入库）====
+release/
+*.zip
