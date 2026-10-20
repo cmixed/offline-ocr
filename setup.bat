@@ -56,12 +56,12 @@ REM 补装 PaddlePaddle 的遗漏依赖（setuptools / chardet）
 echo       正在补装遗漏依赖（setuptools / chardet）...
 .venv\Scripts\python.exe -m pip install "setuptools>=84.0.0" "chardet>=7.6.0"
 
-REM 安装其余依赖（paddleocr、PySide6 等）
-echo       正在安装 paddleocr、PySide6 等依赖...
-.venv\Scripts\python.exe -m pip install paddleocr==3.2.0 "PySide6>=6.6" "opencv-python>=4.8" "Pillow>=10.0" "pyinstaller>=6.0"
+REM 安装其余依赖（paddleocr、PySide6、表格识别所需的 openpyxl / lxml / sklearn 等）
+echo       正在安装 paddleocr、PySide6、表格识别依赖...
+.venv\Scripts\python.exe -m pip install paddleocr==3.2.0 "PySide6>=6.6" "opencv-python>=4.8" "Pillow>=10.0" "pyinstaller>=6.0" "openpyxl>=3.1" "scikit-learn>=1.4" "Jinja2>=3.1" "einops>=0.7" "ftfy>=6.2" "premailer>=3.10" "regex>=2024.0" "tiktoken>=0.7" "tokenizers>=0.19" "lxml>=5.0"
 
 REM ---- 4. 预下载模型（加快首次运行、支持离线使用）----
-echo [4/4] 预下载 OCR 模型（约 20MB，首次较慢）...
+echo [4/4] 预下载识别模型（文字 + 表格，约 30MB，首次较慢）...
 .venv\Scripts\python.exe src\download_models.py
 if errorlevel 1 (
     echo [提示] 模型预下载未完成，不影响使用：首次识别时会自动重试下载。

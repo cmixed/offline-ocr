@@ -20,6 +20,19 @@
 | [opencv-python](https://github.com/opencv/opencv-python) | — | Apache-2.0 | 图像预处理 |
 | [chardet](https://github.com/chardet/chardet) | — | LGPL-2.1 | 字符编码检测（paddlex 依赖） |
 | [setuptools](https://github.com/pypa/setuptools) | — | MIT | 打包/元数据（paddle 运行时依赖） |
+| [openpyxl](https://foss.heptapod.net/openpyxl/openpyxl) | 3.1.5 | MIT | 导出 Excel（表格识别） |
+| [lxml](https://lxml.de/) | 6.1.3 | BSD-3-Clause | HTML/XML 解析（paddlex 表格管线） |
+| [scikit-learn](https://scikit-learn.org/) | 1.9.1 | BSD-3-Clause | 表格管线内部聚类（KMeans） |
+| [SciPy](https://scipy.org/) | 1.18.1 | BSD-3-Clause | scikit-learn 的数值基础 |
+| [tokenizers](https://github.com/huggingface/tokenizers) | 0.23.3 | Apache-2.0 | paddlex 文本处理 |
+| [tiktoken](https://github.com/openai/tiktoken) | 0.14.0 | MIT | paddlex 文本处理 |
+| [Jinja2](https://palletsprojects.com/p/jinja/) | 3.1.6 | BSD-3-Clause | paddlex 报表模板 |
+| [MarkupSafe](https://palletsprojects.com/p/markupsafe/) | 3.0.4 | BSD-3-Clause | Jinja2 依赖 |
+| [einops](https://github.com/arogozhnikov/einops) | 0.8.2 | MIT | 张量重排（paddlex） |
+| [ftfy](https://github.com/rspeer/python-ftfy) | 6.3.1 | Apache-2.0 | 文本修复 |
+| [premailer](https://github.com/peterbe/premailer) | 3.10.0 | BSD-3-Clause | HTML 内联样式 |
+| [regex](https://github.com/mrabarnett/mrab-regex) | — | Apache-2.0 | 正则（premailer 依赖） |
+| [cssutils / cssselect / encutils / more-itertools / joblib / threadpoolctl / et-xmlfile](https://pypi.org/) | — | MIT / BSD / Apache-2.0 | 上述组件的传递依赖 |
 
 ## 二、构建期工具（不随产物分发）
 
@@ -34,8 +47,10 @@
 | 模型 | 来源 | 许可证 |
 |------|------|--------|
 | PP-OCRv5_mobile_det / PP-OCRv5_mobile_rec | PaddleOCR 官方模型库 | Apache-2.0 |
+| SLANet_plus（表格结构识别） | PaddleOCR 官方模型库 | Apache-2.0 |
 
-模型在首次运行时下载到 `~/.paddlex/official_models/`，也可通过 `src/download_models.py` 预下载。
+模型随打包产物分发（约 30MB），首次运行时释放到 `~/.paddlex/official_models/`，
+也可通过 `src/download_models.py` 预下载。
 
 ## 四、关于 LGPLv3 组件（PySide6 / shiboken6）的合规说明
 

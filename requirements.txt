@@ -22,5 +22,21 @@ PySide6>=6.6
 opencv-python>=4.8
 Pillow>=10.0
 
+# ===== 表格识别 =====
+# paddlex 的表格管线被 @pipeline_requires_extra("ocr") 保护，
+# 会检查下面这一整组依赖是否「已安装」（按包元数据判断），缺一个就拒绝创建管线。
+# 其中 scikit-learn 会被 table_recognition_v2 在 import 时用于 KMeans，
+# 因此 pip 会连带装上 scipy（约 114MB）——这是打包体积增长的主因。
+openpyxl>=3.1        # 导出 .xlsx
+lxml>=5.0            # HTML 表格解析（paddlex 内部）
+Jinja2>=3.1
+einops>=0.7
+ftfy>=6.2
+premailer>=3.10
+regex>=2024.0
+tiktoken>=0.7
+tokenizers>=0.19
+scikit-learn>=1.4
+
 # ===== 打包工具（阶段四使用）=====
 pyinstaller>=6.0

@@ -18,25 +18,29 @@ import time
 # 保证能 import 同目录的 ocr_engine
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from ocr_engine import OCREngine
+from ocr_engine import TABLE_STRUCT_MODEL, TableEngine, OCREngine
 
 
 def main() -> int:
     line = "=" * 56
     print(line)
-    print("  OCR 模型预下载")
+    print("  OCR / 表格模型预下载")
     print(line)
 
     engine = OCREngine()
     print(f"  文本检测模型：{engine.det_model}")
     print(f"  文本识别模型：{engine.rec_model}")
+    print(f"  表格结构模型：{TABLE_STRUCT_MODEL}")
     print(f"  缓存目录：{OCREngine.models_dir()}")
     print()
-    print("正在下载并加载模型（首次约需 1~2 分钟，请耐心等待）...")
+    print("正在下载并加载模型（首次约需 1~3 分钟，请耐心等待）...")
 
     start = time.time()
     try:
         engine.preload()
+        print("  [1/2] 文字识别模型就绪")
+        TableEngine().preload()
+        print("  [2/2] 表格结构模型就绪")
     except Exception as e:                       # noqa: BLE001
         print()
         print(f"[失败] 模型下载失败：{e}")

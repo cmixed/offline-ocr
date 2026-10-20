@@ -5,7 +5,7 @@
   - 启动更快（无需每次解包到临时目录）
   - 合规 LGPLv3：PySide6 的 .dll/.pyd 以独立文件存在，便于用户替换
 
-模型策略：把 PP-OCRv5 mobile 模型随包分发，
+模型策略：把 PP-OCRv5 mobile 两个模型 + SLANet_plus（表格结构）随包分发，
   首次运行时由程序复制到用户缓存 (~/.paddlex/official_models/)，
   之后完全离线可用。见 src/main.py 的 _ensure_bundled_models()。
 """
@@ -48,12 +48,16 @@ datas += [
     ("assets/icon.png", "assets"),
 ]
 
-# 内置 OCR 模型（约 22MB）：随包分发，首次运行复制到用户缓存目录
+# 内置模型：随包分发，首次运行复制到用户缓存目录
+# - PP-OCRv5 mobile det/rec：文字识别（普通 / 即时模式）
+# - SLANet_plus：表格结构识别（表格模式，约 8MB）
 _models_src = os.path.join(os.path.expanduser("~"), ".paddlex", "official_models")
-for _m in ("PP-OCRv5_mobile_det", "PP-OCRv5_mobile_rec"):
+for _m in ("PP-OCRv5_mobile_det", "PP-OCRv5_mobile_rec", "SLANet_plus"):
     _p = os.path.join(_models_src, _m)
     if os.path.isdir(_p):
         datas.append((_p, os.path.join("paddlex_models", "official_models", _m)))
+    else:
+        print(f"[warn] 未找到模型 {_m}，打包后将需要联网下载")
 
 # ---------------- 二进制动态库 ----------------
 # PaddlePaddle 的 C++ 核心库（libpaddle.pyd 等）必须显式收集
@@ -70,6 +74,11 @@ hiddenimports += [
     "paddle.base.libpaddle",
     "paddle.utils",
     "PIL._tkinter_finder",  # 规避 PIL 的 tkinter 探测告警
+    # 表格识别链路上动态导入的依赖（静态分析抓不到）
+    "sklearn.cluster", "sklearn.cluster._kmeans",
+    "openpyxl", "openpyxl.styles", "openpyxl.utils",
+    "lxml", "lxml.etree", "lxml.html",
+    "tokenizers", "tiktoken",
 ]
 
 # ---------------- 排除体积大户 / 无关模块 ----------------
@@ -86,8 +95,11 @@ excludes = [
     "PySide6.QtStateMachine", "PySide6.QtSvg", "PySide6.QtSvgWidgets", "PySide6.QtTextToSpeech",
     "PySide6.QtWebChannel", "PySide6.QtWebSockets", "PySide6.QtPdf", "PySide6.QtPdfWidgets",
     # 科学计算 / 开发工具（本程序不依赖）
+    # 注意：scipy 不能排除 —— 表格识别链路会导入 scikit-learn（paddlex 的
+    # table_recognition_v2 在 import 时按依赖可用性导入 KMeans），
+    # 而 sklearn 依赖 scipy。排除后打包产物一进表格模式就会 ImportError。
     "matplotlib", "tkinter", "IPython", "pytest", "notebook", "jupyter",
-    "scipy", "sympy", "numba", "torch", "tensorflow",
+    "sympy", "numba", "torch", "tensorflow",
     # modelscope 中 OCR 流程用不到的重型子包。
     # 依据运行诊断：实际只加载 modelscope.hub / modelscope.utils（modelscope.models 加载数为 0），
     # 而这些 CV/NLP/音频模型定义体量巨大，且部分会牵连 paddle.jit.sot 导致打包分析崩溃。
