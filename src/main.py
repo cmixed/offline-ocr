@@ -26,9 +26,9 @@ from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QLabel, QPushButton, QTextEdit,
     QVBoxLayout, QHBoxLayout, QSplitter, QFileDialog, QMessageBox, QStatusBar,
     QScrollArea, QCheckBox, QProgressBar, QDialog, QDialogButtonBox,
-    QGroupBox, QGridLayout,
+    QGroupBox, QGridLayout, QKeySequenceEdit,
 )
-from PySide6.QtCore import Qt, QThread, Signal
+from PySide6.QtCore import Qt, QThread, Signal, QSettings
 from PySide6.QtGui import QPixmap, QImage, QFont, QIcon, QKeySequence, QShortcut
 
 from ocr_engine import (
@@ -41,22 +41,63 @@ engine = OCREngine()
 
 PLACEHOLDER = "把图片拖到这里\n\n或点击「选择图片」"
 
-# 快捷键的唯一来源：同一份数据既用于真正绑定按键，也用于「设置」面板里的说明表。
-# 避免「说明里写着 Ctrl+S，实际却绑在别的键上」这种两处定义漂移。
-# 结构：(显示的按键, 说明, 动作键)
-SHORTCUTS = [
-    ("Ctrl+O", "选择图片", "open"),
-    ("Ctrl+Enter", "开始识别", "run"),
-    ("Ctrl+Shift+C", "复制识别结果（Ctrl+C 留给结果框自己）", "copy"),
-    ("Ctrl+S", "导出为 TXT / Markdown", "export"),
-    ("Ctrl+0", "适应窗口", "fit"),
-    ("Ctrl+1", "原始大小（1:1）", "actual"),
-    ("Ctrl+B", "切换原图 / 识别框图", "annot"),
-    ("F1", "打开本设置面板", "settings"),
+# ---------- 快捷键定义与持久化 ----------
+#
+# DEFAULT_SHORTCUTS 是唯一来源：默认值、绑定、设置面板、测试都读它。
+# 结构：(动作键, 说明, 默认按键元组)
+# 一个动作可以有多个按键（例如 Ctrl+Enter 同时覆盖主键盘与小键盘回车）。
+DEFAULT_SHORTCUTS = [
+    ("open", "选择图片", ("Ctrl+O",)),
+    ("run", "开始识别", ("Ctrl+Enter", "Ctrl+Return")),
+    ("copy", "复制识别结果（Ctrl+C 留给结果框自己）", ("Ctrl+Shift+C",)),
+    ("export", "导出为 TXT / Markdown", ("Ctrl+S",)),
+    ("fit", "适应窗口", ("Ctrl+0",)),
+    ("actual", "原始大小（1:1）", ("Ctrl+1",)),
+    ("annot", "切换原图 / 识别框图", ("Ctrl+B",)),
+    ("settings", "打开设置面板", ("F1",)),
 ]
 
-# 想覆盖「主键区回车」与「小键盘回车」两种按法：同一动作多绑一个序列
-_SHORTCUT_ALIASES = {"Ctrl+Enter": ("Ctrl+Enter", "Ctrl+Return")}
+# 用户改过的按键存在这里（Windows 下即注册表 HKCU\Software\QIWANYANG\ocrapp）
+SETTINGS_ORG = "QIWANYANG"
+SETTINGS_APP = "ocrapp"
+
+
+def _settings() -> QSettings:
+    return QSettings(SETTINGS_ORG, SETTINGS_APP)
+
+
+def load_shortcuts(settings: QSettings | None = None) -> dict:
+    """读取用户的快捷键配置，返回 {动作键: (按键序列, ...)}。
+
+    未配置过的动作回落到默认值；用户主动清空的动作保存为空元组（= 不绑定）。
+    为此用 None 作默认值来区分「没存过」与「存了空字符串」。
+    """
+    s = settings or _settings()
+    result = {}
+    for name, _desc, defaults in DEFAULT_SHORTCUTS:
+        raw = s.value(f"shortcuts/{name}", None)
+        if raw is None:
+            result[name] = tuple(defaults)
+            continue
+        # 序列内不含分号，用分号连接多个按键
+        parts = tuple(p.strip() for p in str(raw).split(";") if p.strip())
+        # 过滤掉无法解析的脏数据（例如手工改过配置）
+        result[name] = tuple(p for p in parts if not QKeySequence(p).isEmpty())
+    return result
+
+
+def save_shortcuts(mapping: dict, settings: QSettings | None = None) -> None:
+    """把快捷键配置写入 QSettings。"""
+    s = settings or _settings()
+    for name, _desc, _defaults in DEFAULT_SHORTCUTS:
+        seqs = mapping.get(name, ())
+        s.setValue(f"shortcuts/{name}", ";".join(seqs))
+    s.sync()
+
+
+def shortcuts_to_text(seqs) -> str:
+    """给界面用：把按键序列拼成 "Ctrl+Enter / Ctrl+Return" 这种可读形式。"""
+    return " / ".join(seqs) if seqs else ""
 
 
 def _asset_path(name: str) -> str:
@@ -317,55 +358,164 @@ class RecognizeWorker(QThread):
 
 
 class SettingsDialog(QDialog):
-    """设置面板：目前用于集中展示快捷键，后续的偏好项也放这里。
+    """设置面板：查看并重新绑定快捷键，保存后立即生效。
 
-    快捷键表直接读模块级 SHORTCUTS，所以「这里显示什么」等价于「程序绑了什么」，
-    不会出现面板与实际行为不一致的情况。
+    三个约束保证「看到的就是生效的」：
+    - 行内容来自 load_shortcuts()（用户配置），而不是另一份硬编码
+    - 保存前做冲突检查，同一个组合键不能绑给两个动作
+    - 保存成功后发 saved 信号，主窗口立刻重建 QShortcut，无需重启
     """
 
-    KEYCAP_STYLE = (
-        "QLabel { background: #f2f3f5; border: 1px solid #c9ced6;"
-        " border-radius: 5px; padding: 1px 8px; color: #333;"
+    saved = Signal(dict)
+
+    EDIT_STYLE = (
+        "QKeySequenceEdit { border: 1px solid #c9ced6; border-radius: 5px;"
+        " padding: 3px 8px; background: white; color: #222;"
         " font-family: Consolas, 'Courier New', monospace; font-size: 12px; }"
+        "QKeySequenceEdit:focus { border: 1px solid #2a7; }"
     )
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("设置")
-        self.setMinimumWidth(520)
+        self.setMinimumWidth(600)
         self.setModal(True)
+
+        self._edits: dict[str, QKeySequenceEdit] = {}
+        current = load_shortcuts()
 
         layout = QVBoxLayout(self)
         layout.setSpacing(12)
 
-        group = QGroupBox("快捷键")
+        group = QGroupBox("快捷键（点进输入框，直接按下新的组合键）")
         grid = QGridLayout(group)
-        grid.setHorizontalSpacing(14)
-        grid.setVerticalSpacing(9)
-        grid.setColumnStretch(1, 1)
+        grid.setHorizontalSpacing(10)
+        grid.setVerticalSpacing(8)
+        grid.setColumnStretch(0, 1)
 
-        for row, (keys, desc, _name) in enumerate(SHORTCUTS):
-            cap = QLabel(keys)
-            cap.setStyleSheet(self.KEYCAP_STYLE)
-            cap.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            # 按键列宽度对齐，说明列自然铺开
-            cap.setMinimumWidth(104)
-            grid.addWidget(cap, row, 0, Qt.AlignmentFlag.AlignLeft)
-            grid.addWidget(QLabel(desc), row, 1)
+        for row, (name, desc, _defaults) in enumerate(DEFAULT_SHORTCUTS):
+            edit = QKeySequenceEdit()
+            edit.setMaximumSequenceLength(4)          # 一个功能可填多个组合键（任一触发）
+            edit.setStyleSheet(self.EDIT_STYLE)
+            edit.setMinimumWidth(230)
+            edit.setToolTip("直接按下新的组合键即可；右侧「清除」可解除绑定")
+            edit.setKeySequence(QKeySequence(", ".join(current.get(name, ()))))
+            self._edits[name] = edit
+
+            clear_btn = QPushButton("清除")
+            clear_btn.setFixedWidth(52)
+            clear_btn.setToolTip("解除这个功能的快捷键绑定")
+            clear_btn.clicked.connect(edit.clear)
+
+            grid.addWidget(QLabel(desc), row, 0)
+            grid.addWidget(edit, row, 1)
+            grid.addWidget(clear_btn, row, 2)
 
         layout.addWidget(group)
 
         hint = QLabel(
-            "提示：快捷键在整个窗口内生效；没有载入图片或还没有识别结果时，\n"
-            "对应的快捷键不会触发（与按钮的可用状态一致）。"
+            "快捷键在整个窗口内生效；未载入图片或还没有识别结果时不会触发（与按钮可用状态一致）。\n"
+            "一个功能可以填多个组合键（如 Ctrl+Enter, Ctrl+Return），按其中任意一个都生效。\n"
+            "保存后立即生效，配置保存在本机，下次启动仍然有效。"
         )
         hint.setStyleSheet("color: #777;")
         layout.addWidget(hint)
 
-        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
-        buttons.button(QDialogButtonBox.StandardButton.Close).setText("关闭")
+        self.btn_default = QPushButton("恢复默认")
+        self.btn_default.clicked.connect(self._restore_defaults)
+
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Save
+            | QDialogButtonBox.StandardButton.Cancel)
+        buttons.button(QDialogButtonBox.StandardButton.Save).setText("保存")
+        buttons.button(QDialogButtonBox.StandardButton.Cancel).setText("取消")
+        buttons.accepted.connect(self._on_save)
         buttons.rejected.connect(self.reject)
-        layout.addWidget(buttons)
+
+        bottom = QHBoxLayout()
+        bottom.addWidget(self.btn_default)
+        bottom.addStretch()
+        bottom.addWidget(buttons)
+        layout.addLayout(bottom)
+
+    # ---------- 内部 ----------
+
+    def _restore_defaults(self):
+        for name, _desc, defaults in DEFAULT_SHORTCUTS:
+            self._edits[name].setKeySequence(QKeySequence(", ".join(defaults)))
+
+    def collect(self) -> dict:
+        """把界面上的输入整理成 {动作键: (按键序列, ...)}。"""
+        result = {}
+        for name, edit in self._edits.items():
+            ks = edit.keySequence()
+            seqs = []
+            for i in range(ks.count()):
+                # ks[i] 是 QKeyCombination，需包回 QKeySequence 才能取文本
+                text = QKeySequence(ks[i]).toString(
+                    QKeySequence.SequenceFormat.PortableText)
+                if text:
+                    seqs.append(text)
+            result[name] = tuple(seqs)
+        return result
+
+    @staticmethod
+    def find_conflicts(mapping: dict) -> list:
+        """返回冲突描述列表：同一个组合键绑给了多个动作。"""
+        owners: dict[str, list] = {}
+        for name, seqs in mapping.items():
+            for seq in seqs:
+                owners.setdefault(seq, [])
+                if name not in owners[seq]:
+                    owners[seq].append(name)
+        desc = {name: desc for name, desc, _d in DEFAULT_SHORTCUTS}
+        return [
+            f"{seq} 同时绑给了：{'、'.join(desc[n] for n in names)}"
+            for seq, names in owners.items() if len(names) > 1
+        ]
+
+    @staticmethod
+    def find_invalid(mapping: dict) -> list:
+        """挑出「无修饰键的普通键」——绑成快捷键会抢走输入，必须拒绝。
+
+        例如把复制绑成 S：在结果框里打 s 就会触发复制，完全没法用。
+        放行 F1~F35 这类功能键，它们不参与文字输入。
+        """
+        desc = {name: desc for name, desc, _d in DEFAULT_SHORTCUTS}
+        bad = []
+        for name, seqs in mapping.items():
+            for seq in seqs:
+                comb = QKeySequence(seq)[0]
+                if comb.keyboardModifiers() != Qt.KeyboardModifier.NoModifier:
+                    continue
+                key = comb.key()
+                if Qt.Key.Key_F1 <= key <= Qt.Key.Key_F35:
+                    continue
+                bad.append(f"{seq}（{desc[name]}）")
+        return bad
+
+    def _on_save(self):
+        mapping = self.collect()
+        conflicts = self.find_conflicts(mapping)
+        if conflicts:
+            QMessageBox.warning(
+                self, "快捷键冲突",
+                "同一个组合键不能同时绑定到两个功能：\n\n"
+                + "\n".join(f"· {c}" for c in conflicts)
+                + "\n\n请调整后再保存。")
+            return
+        invalid = self.find_invalid(mapping)
+        if invalid:
+            QMessageBox.warning(
+                self, "快捷键不可用",
+                "下面这些按键没有带 Ctrl / Alt / Shift，\n"
+                "绑成快捷键后会在输入文字时误触发：\n\n"
+                + "\n".join(f"· {x}" for x in invalid)
+                + "\n\n请加上修饰键（如 Ctrl+S），或改用 F1~F12 功能键。")
+            return
+        save_shortcuts(mapping)
+        self.saved.emit(mapping)
+        self.accept()
 
 
 class MainWindow(QMainWindow):
@@ -401,7 +551,7 @@ class MainWindow(QMainWindow):
         self.btn_export.clicked.connect(self.on_export)
 
         self.btn_settings = QPushButton("设置")
-        self.btn_settings.setToolTip("查看快捷键说明（F1）")
+        self.btn_settings.setToolTip("查看与自定义快捷键")
         self.btn_settings.clicked.connect(self.open_settings)
 
         toolbar = QHBoxLayout()
@@ -479,7 +629,7 @@ class MainWindow(QMainWindow):
     # ---------- 快捷键 ----------
 
     def _action_map(self) -> dict:
-        """动作键 -> 槽函数。SHORTCUTS 里的动作键必须在这里有对应实现。"""
+        """动作键 -> 槽函数。DEFAULT_SHORTCUTS 里的动作键必须在这里有对应实现。"""
         return {
             "open": self.on_open,
             "run": self.on_run,
@@ -491,24 +641,56 @@ class MainWindow(QMainWindow):
             "settings": self.open_settings,
         }
 
-    def _bind_shortcuts(self):
-        """按 SHORTCUTS 绑定快捷键（窗口内生效）。
+    def _bind_shortcuts(self, mapping: dict | None = None):
+        """按用户配置重建全部快捷键（窗口内生效），旧绑定先拆掉。
 
         用 QShortcut 而不是给按钮设 mnemonic：按钮文字里加 & 会显示下划线，
         且 Alt 组合键不符合 Windows 用户的 Ctrl 习惯。
         """
-        actions = self._action_map()
+        mapping = mapping or load_shortcuts()
+        self.shortcut_map = mapping
+
+        for sc in getattr(self, "_shortcuts", []):
+            sc.setEnabled(False)      # 先禁用，避免与新建的绑定短暂重复触发
+            sc.setParent(None)
+            sc.deleteLater()
         self._shortcuts = []
-        for keys, _desc, name in SHORTCUTS:
-            slot = actions[name]
-            for seq in _SHORTCUT_ALIASES.get(keys, (keys,)):
+
+        actions = self._action_map()
+        for name, seqs in mapping.items():
+            slot = actions.get(name)
+            if slot is None:          # 配置里出现未知动作键（旧版本残留）时跳过
+                continue
+            for seq in seqs:
                 sc = QShortcut(QKeySequence(seq), self)
                 sc.setContext(Qt.ShortcutContext.WindowShortcut)
                 sc.activated.connect(slot)
                 self._shortcuts.append(sc)
 
+        self._refresh_shortcut_tooltips()
+
+    def _refresh_shortcut_tooltips(self):
+        """按钮提示里显示当前绑定，改键后能立刻看到结果。"""
+        hints = {name: shortcuts_to_text(seqs)
+                 for name, seqs in getattr(self, "shortcut_map", {}).items()}
+        for btn, name, text in (
+            (self.btn_open, "open", "选择图片"),
+            (self.btn_run, "run", "开始识别"),
+            (self.btn_copy, "copy", "复制结果"),
+            (self.btn_export, "export", "导出文件"),
+        ):
+            tip = f"{text}（{hints[name]}）" if hints.get(name) else text
+            btn.setToolTip(tip)
+        self.btn_settings.setToolTip(
+            f"查看与自定义快捷键（{hints['settings']}）" if hints.get("settings")
+            else "查看与自定义快捷键")
+
     def open_settings(self):
-        SettingsDialog(self).exec()
+        dlg = SettingsDialog(self)
+        dlg.saved.connect(self._bind_shortcuts)   # 保存后立即生效，无需重启
+        if dlg.exec() and self.shortcut_map.get("settings"):
+            self.statusBar().showMessage(
+                f"快捷键已更新（设置面板：{shortcuts_to_text(self.shortcut_map['settings'])}）")
 
     def _toggle_annot(self):
         """原图 / 识别框图切换（快捷键用）。识别框不可用时不做任何事。"""
