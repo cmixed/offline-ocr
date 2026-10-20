@@ -25,10 +25,11 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QLabel, QPushButton, QTextEdit,
     QVBoxLayout, QHBoxLayout, QSplitter, QFileDialog, QMessageBox, QStatusBar,
-    QScrollArea, QCheckBox, QProgressBar,
+    QScrollArea, QCheckBox, QProgressBar, QDialog, QDialogButtonBox,
+    QGroupBox, QGridLayout,
 )
 from PySide6.QtCore import Qt, QThread, Signal
-from PySide6.QtGui import QPixmap, QImage, QFont, QIcon
+from PySide6.QtGui import QPixmap, QImage, QFont, QIcon, QKeySequence, QShortcut
 
 from ocr_engine import (
     MAX_SIDE, OCREngine, OCRLine, SUPPORTED_EXTS,
@@ -39,6 +40,23 @@ from ocr_engine import (
 engine = OCREngine()
 
 PLACEHOLDER = "把图片拖到这里\n\n或点击「选择图片」"
+
+# 快捷键的唯一来源：同一份数据既用于真正绑定按键，也用于「设置」面板里的说明表。
+# 避免「说明里写着 Ctrl+S，实际却绑在别的键上」这种两处定义漂移。
+# 结构：(显示的按键, 说明, 动作键)
+SHORTCUTS = [
+    ("Ctrl+O", "选择图片", "open"),
+    ("Ctrl+Enter", "开始识别", "run"),
+    ("Ctrl+Shift+C", "复制识别结果（Ctrl+C 留给结果框自己）", "copy"),
+    ("Ctrl+S", "导出为 TXT / Markdown", "export"),
+    ("Ctrl+0", "适应窗口", "fit"),
+    ("Ctrl+1", "原始大小（1:1）", "actual"),
+    ("Ctrl+B", "切换原图 / 识别框图", "annot"),
+    ("F1", "打开本设置面板", "settings"),
+]
+
+# 想覆盖「主键区回车」与「小键盘回车」两种按法：同一动作多绑一个序列
+_SHORTCUT_ALIASES = {"Ctrl+Enter": ("Ctrl+Enter", "Ctrl+Return")}
 
 
 def _asset_path(name: str) -> str:
@@ -298,6 +316,58 @@ class RecognizeWorker(QThread):
             self.failed.emit(str(e))
 
 
+class SettingsDialog(QDialog):
+    """设置面板：目前用于集中展示快捷键，后续的偏好项也放这里。
+
+    快捷键表直接读模块级 SHORTCUTS，所以「这里显示什么」等价于「程序绑了什么」，
+    不会出现面板与实际行为不一致的情况。
+    """
+
+    KEYCAP_STYLE = (
+        "QLabel { background: #f2f3f5; border: 1px solid #c9ced6;"
+        " border-radius: 5px; padding: 1px 8px; color: #333;"
+        " font-family: Consolas, 'Courier New', monospace; font-size: 12px; }"
+    )
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("设置")
+        self.setMinimumWidth(520)
+        self.setModal(True)
+
+        layout = QVBoxLayout(self)
+        layout.setSpacing(12)
+
+        group = QGroupBox("快捷键")
+        grid = QGridLayout(group)
+        grid.setHorizontalSpacing(14)
+        grid.setVerticalSpacing(9)
+        grid.setColumnStretch(1, 1)
+
+        for row, (keys, desc, _name) in enumerate(SHORTCUTS):
+            cap = QLabel(keys)
+            cap.setStyleSheet(self.KEYCAP_STYLE)
+            cap.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            # 按键列宽度对齐，说明列自然铺开
+            cap.setMinimumWidth(104)
+            grid.addWidget(cap, row, 0, Qt.AlignmentFlag.AlignLeft)
+            grid.addWidget(QLabel(desc), row, 1)
+
+        layout.addWidget(group)
+
+        hint = QLabel(
+            "提示：快捷键在整个窗口内生效；没有载入图片或还没有识别结果时，\n"
+            "对应的快捷键不会触发（与按钮的可用状态一致）。"
+        )
+        hint.setStyleSheet("color: #777;")
+        layout.addWidget(hint)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+        buttons.button(QDialogButtonBox.StandardButton.Close).setText("关闭")
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -330,10 +400,15 @@ class MainWindow(QMainWindow):
         self.btn_copy.clicked.connect(self.on_copy)
         self.btn_export.clicked.connect(self.on_export)
 
+        self.btn_settings = QPushButton("设置")
+        self.btn_settings.setToolTip("查看快捷键说明（F1）")
+        self.btn_settings.clicked.connect(self.open_settings)
+
         toolbar = QHBoxLayout()
         for b in (self.btn_open, self.btn_run, self.btn_copy, self.btn_export):
             toolbar.addWidget(b)
         toolbar.addStretch()
+        toolbar.addWidget(self.btn_settings)
 
         # --- 左侧：图片工具条 + 画布 ---
         self.image_canvas = ImageCanvas()
@@ -398,7 +473,47 @@ class MainWindow(QMainWindow):
         self.statusBar().addPermanentWidget(self.progress)
         self.statusBar().showMessage("就绪")
 
+        self._bind_shortcuts()
         self._update_tool_state()
+
+    # ---------- 快捷键 ----------
+
+    def _action_map(self) -> dict:
+        """动作键 -> 槽函数。SHORTCUTS 里的动作键必须在这里有对应实现。"""
+        return {
+            "open": self.on_open,
+            "run": self.on_run,
+            "copy": self.on_copy,
+            "export": self.on_export,
+            "fit": self.image_canvas.fit_window,
+            "actual": self.image_canvas.actual_size,
+            "annot": self._toggle_annot,
+            "settings": self.open_settings,
+        }
+
+    def _bind_shortcuts(self):
+        """按 SHORTCUTS 绑定快捷键（窗口内生效）。
+
+        用 QShortcut 而不是给按钮设 mnemonic：按钮文字里加 & 会显示下划线，
+        且 Alt 组合键不符合 Windows 用户的 Ctrl 习惯。
+        """
+        actions = self._action_map()
+        self._shortcuts = []
+        for keys, _desc, name in SHORTCUTS:
+            slot = actions[name]
+            for seq in _SHORTCUT_ALIASES.get(keys, (keys,)):
+                sc = QShortcut(QKeySequence(seq), self)
+                sc.setContext(Qt.ShortcutContext.WindowShortcut)
+                sc.activated.connect(slot)
+                self._shortcuts.append(sc)
+
+    def open_settings(self):
+        SettingsDialog(self).exec()
+
+    def _toggle_annot(self):
+        """原图 / 识别框图切换（快捷键用）。识别框不可用时不做任何事。"""
+        if self.chk_annot.isEnabled():
+            self.chk_annot.setChecked(not self.chk_annot.isChecked())
 
     def _update_tool_state(self):
         """图片工具条可用性"""

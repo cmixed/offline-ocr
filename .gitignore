@@ -33,7 +33,12 @@ Thumbs.db
 result_vis.*
 ocr_report.html
 gui_*.png
+shot_*.png
 ocr_result.*
+
+# ==== 本地真实场景测试图集（PaddleOCR 官方样例，约 40MB，不入库）====
+# 自行下载放到 ppocr_img/ppocr_img/ 下，即可用 README「真实场景测试」的方式试跑
+ppocr_img/
 
 # ==== 测试临时目录（test_formats.py 运行时生成）====
 test/_fmt_tmp/
