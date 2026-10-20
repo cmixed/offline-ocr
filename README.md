@@ -2,7 +2,15 @@
 
 <img src="assets/icon.png" width="88" align="right" alt="应用图标">
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Python](https://img.shields.io/badge/Python-3.9%20~%203.13-blue.svg)](https://www.python.org/)
+[![Platform](https://img.shields.io/badge/Platform-Windows%2010%2F11-0078D4.svg)](#前置要求)
+[![Release](https://img.shields.io/github/v/release/qiwanyang/offline-ocr)](https://github.com/qiwanyang/offline-ocr/releases/latest)
+
 > 一个本地离线运行的 OCR 图片识别小软件，专注「垂直场景」，从普通图片识别起步。
+
+**不想装 Python 环境？** 直接下载 [Windows 免安装包](https://github.com/qiwanyang/offline-ocr/releases/latest)（319 MB），
+解压双击 `OCR小软件.exe` 就能用 —— 模型已内置，全程离线。
 
 ## 简介
 
