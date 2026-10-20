@@ -80,6 +80,16 @@
 
 > 注：`.ico` 受格式规范限制最大 256×256，更大的图会被降采样；`.gif` / `.tiff` 若为多帧 / 多页，只读取第一帧。
 
+## 获取代码
+
+```bash
+git clone https://github.com/qiwanyang/offline-ocr.git
+cd offline-ocr
+```
+
+不想装 Python 环境的话，可以直接到 [Releases](https://github.com/qiwanyang/offline-ocr/releases)
+下载打包好的 Windows 压缩包，解压后双击 `OCR小软件.exe` 即可运行（模型已内置，全程离线）。
+
 ## 从零搭建（环境可复现）
 
 ### 前置要求
@@ -397,4 +407,4 @@ ocrapp/
 
 ## 进度
 
-详见《OCR项目进度跟踪.md》
+开发过程与踩坑记录详见 [OCR项目进度跟踪.md](OCR项目进度跟踪.md)。
