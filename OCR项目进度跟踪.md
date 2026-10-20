@@ -33,7 +33,7 @@
 ### 2. 环境搭建（已完成）
 
 - ✅ 确认本机 Python 3.13.14（64 位 AMD64），符合 PaddlePaddle 3.x 要求
-- ✅ 创建独立虚拟环境 `.venv`（项目路径：`D:\workbuddy_ws\ocrapp`）
+- ✅ 创建独立虚拟环境 `.venv`（项目根目录下）
 - ✅ 安装 PaddlePaddle 3.2.1（CPU 版，官方国内镜像）
 - ✅ 安装 paddleocr 3.2.0、Qt 界面库（初装 PyQt6 6.11.0，后迁移至 PySide6 6.12.0）、opencv-python、Pillow
 - ✅ 编写 `requirements.txt` 依赖清单（含 setuptools/chardet 遗漏依赖修复）
@@ -313,7 +313,7 @@ GUI 进程亦正常启动（约 96MB 常驻内存）。
 - ✅ `setup.bat` 一键安装脚本（脚本 + 文档双方案）
 - ✅ `README.md` 含「从零搭建」章节（Windows 安装步骤）
 - ✅ `requirements.lock`（`pip freeze` 全量锁定 69 个包，可精确复现）
-- 🟡 模型文件已缓存在 `C:\Users\七碗羊\.paddlex\official_models\`（首次运行自动下载，非首次秒开）
+- 🟡 模型文件已缓存在 `~/.paddlex/official_models/`（首次运行自动下载，非首次秒开）
 
 ### 待完善
 
